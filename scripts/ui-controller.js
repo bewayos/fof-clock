@@ -156,70 +156,67 @@ export class UIController {
   }
 
   addSceneControl(controls) {
-  if (!game.user.isGM) return;
+    if (!game.user.isGM) return false;
 
-  const tools = [
-    {
-      name: "open",
-      title: "Open FoF Clock",
-      icon: "fas fa-clock",
-      button: true,
-      onClick: () => this.openUI()
-    },
-    {
-      name: "advance1",
-      title: "+1 Turn",
-      icon: "fas fa-forward-step",
-      button: true,
-      onClick: async () => this.api.advanceTime(1)
-    },
-    {
-      name: "advance5",
-      title: "+5 Turns",
-      icon: "fas fa-forward",
-      button: true,
-      onClick: async () => this.api.advanceTime(5)
-    },
-    {
-      name: "ignite",
-      title: "Ignite Torch",
-      icon: "fas fa-fire",
-      button: true,
-      onClick: async () => this.onQuickIgnite()
-    },
-    {
-      name: "drop",
-      title: "Drop Torch",
-      icon: "fas fa-arrow-down",
-      button: true,
-      onClick: async () => this.onQuickDrop()
-    },
-    {
-      name: "pickup",
-      title: "Pickup Torch",
-      icon: "fas fa-hand",
-      button: true,
-      onClick: async () => this.onQuickPickup()
+    if (controls.some((c) => c.name === "fof-clock")) {
+      debugLog("controls-registered", { group: "fof-clock", tools: [] });
+      return true;
     }
-  ];
 
-  // ❗ НЕ ДОДАЄМО ДУБЛІ
-  if (controls.some(c => c.name === "fof-clock")) return;
+    const tools = [
+      {
+        name: "open",
+        title: "Open FoF Clock",
+        icon: "fas fa-clock",
+        button: true,
+        onClick: () => this.openUI()
+      },
+      {
+        name: "advance1",
+        title: "+1 Turn",
+        icon: "fas fa-forward-step",
+        button: true,
+        onClick: async () => this.api.advanceTime(1)
+      },
+      {
+        name: "advance5",
+        title: "+5 Turns",
+        icon: "fas fa-forward",
+        button: true,
+        onClick: async () => this.api.advanceTime(5)
+      },
+      {
+        name: "ignite",
+        title: "Ignite Torch",
+        icon: "fas fa-fire",
+        button: true,
+        onClick: async () => this.onQuickIgnite()
+      },
+      {
+        name: "drop",
+        title: "Drop Torch",
+        icon: "fas fa-arrow-down",
+        button: true,
+        onClick: async () => this.onQuickDrop()
+      },
+      {
+        name: "pickup",
+        title: "Pickup Torch",
+        icon: "fas fa-hand",
+        button: true,
+        onClick: async () => this.onQuickPickup()
+      }
+    ];
 
-  controls.push({
-    name: "fof-clock",
-    title: "FoF Clock",
-    icon: "fas fa-clock",
-    layer: "controls",
-    tools
-  });
-}
+    controls.push({
+      name: "fof-clock",
+      title: "FoF Clock",
+      icon: "fas fa-clock",
+      layer: "controls",
+      tools
+    });
 
-    const existing = new Set(tokenControls.tools.map((t) => t.name));
-    const newTools = toolsToAdd.filter((tool) => !existing.has(tool.name));
-    if (!newTools.length) return;
-
-    tokenControls.tools.push(...newTools);
-    debugLog("controls-registered", { group: "token", tools: newTools.map((t) => t.name) });
+    debugLog("controls-registered", { group: "fof-clock", tools: tools.map((t) => t.name) });
+    return true;
   }
 }

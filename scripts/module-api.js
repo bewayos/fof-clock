@@ -98,7 +98,13 @@ export class FoFClockAPI {
 
     const dropped = LightManager.dropLight(light, token);
     await this.patchLight(light.id, dropped);
-    await LightManager.syncSceneLights(this.getState(), token.parent);
+
+    const ambientLightId = await LightManager.ensureDroppedAmbient(dropped, token.parent);
+    if (ambientLightId && ambientLightId !== dropped.ambientLightId) {
+      await this.patchLight(light.id, { ambientLightId });
+    }
+
+    await LightManager.syncCarriedLights(this.getLightsForScene(token.parent.id), token.parent);
   }
 
   async pickUpNearestDroppedLight(token) {
@@ -150,8 +156,11 @@ export class FoFClockAPI {
 
     await LightManager.cleanupExpiredDropped(expiredLights);
 
-    const scene = canvas?.scene;
-    if (scene) await LightManager.syncSceneLights(after, scene);
+    const activeSceneIds = new Set(Object.values(after.lights).map((light) => light.sceneId));
+    for (const sceneId of activeSceneIds) {
+      const scene = game.scenes.get(sceneId);
+      if (scene) await LightManager.syncSceneLights(after, scene);
+    }
 
     if (game.user.isGM) {
       warnings.forEach((light) => {
