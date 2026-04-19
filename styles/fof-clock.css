@@ -1,0 +1,23 @@
+.fof-clock-app {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.fof-clock-status h3 {
+  margin: 0;
+}
+
+.fof-row {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.fof-row-stack {
+  flex-direction: column;
+}
+
+.fof-clock button {
+  cursor: pointer;
+}
