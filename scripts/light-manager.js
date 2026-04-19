@@ -1,6 +1,13 @@
 import { LIGHT_TYPES, MODULE_ID, TOKEN_LIGHT_FLAG } from "./constants.js";
 import { debugLog, warnLog } from "./logger.js";
 
+function lightConfigEqual(left = {}, right = {}) {
+  return ["dim", "bright", "angle", "alpha", "color", "attenuation", "luminosity", "shadows"].every((key) => left[key] === right[key])
+    && (left.animation?.type ?? null) === (right.animation?.type ?? null)
+    && (left.animation?.speed ?? 0) === (right.animation?.speed ?? 0)
+    && (left.animation?.intensity ?? 0) === (right.animation?.intensity ?? 0);
+}
+
 export class LightManager {
   static generateId() {
     return foundry.utils.randomID();
@@ -78,6 +85,41 @@ export class LightManager {
     return null;
   }
 
+  static findAmbientForLight(scene, light) {
+    if (!scene || !light) return null;
+    if (light.ambientLightId && scene.lights.get(light.ambientLightId)) return scene.lights.get(light.ambientLightId);
+    return scene.lights.contents.find((ambient) => ambient.getFlag(MODULE_ID, "lightId") === light.id) ?? null;
+  }
+
+  static async ensureDroppedAmbient(light, scene) {
+    if (!scene || !light?.position) return null;
+
+    const config = this.ambientLightConfig(light.id, light.type, light.position);
+    const existing = this.findAmbientForLight(scene, light);
+
+    if (existing) {
+      const changed = Number(existing.x) !== Number(config.x)
+        || Number(existing.y) !== Number(config.y)
+        || !lightConfigEqual(existing.config ?? {}, config.config ?? {});
+
+      if (changed) {
+        await scene.updateEmbeddedDocuments("AmbientLight", [{ _id: existing.id, ...config }]);
+      }
+
+      return existing.id;
+    }
+
+    const created = await scene.createEmbeddedDocuments("AmbientLight", [config]);
+    return created?.[0]?.id ?? null;
+  }
+
+  static async deleteAmbientForLight(scene, light) {
+    if (!scene || !light) return;
+    const ambient = this.findAmbientForLight(scene, light);
+    if (!ambient?.id) return;
+    await scene.deleteEmbeddedDocuments("AmbientLight", [ambient.id]);
+  }
+
   static async syncSceneLights(state, scene = canvas?.scene) {
     if (!scene) return;
     const lights = Object.values(state.lights).filter((l) => l.sceneId === scene.id);
@@ -86,14 +128,14 @@ export class LightManager {
   }
 
   static async syncCarriedLights(lights, scene) {
-    const carried = lights.filter((l) => l.tokenId || l.actorId);
+    const carried = lights.filter((l) => !!l.tokenId);
     const tokenUpdates = [];
     const activeLightIds = new Set();
 
     for (const light of carried) {
       const tokenDoc = this.resolveTokenForLight(light, scene);
       if (!tokenDoc) {
-        warnLog("missing-token-for-light", { lightId: light.id, tokenId: light.tokenId, actorId: light.actorId, sceneId: scene.id });
+        warnLog("light change: missing-token-for-light", { lightId: light.id, tokenId: light.tokenId, actorId: light.actorId, sceneId: scene.id });
         continue;
       }
 
@@ -137,28 +179,41 @@ export class LightManager {
       await scene.updateEmbeddedDocuments("Token", clearUpdates);
     }
 
-    debugLog("sync-carried", { sceneId: scene.id, updates: tokenUpdates.length, clears: clearUpdates.length });
+    debugLog("light change", { sceneId: scene.id, updates: tokenUpdates.length, clears: clearUpdates.length });
   }
 
   static async syncDroppedLights(lights, scene) {
     const dropped = lights.filter((l) => this.isDropped(l));
     const existing = scene.lights.contents.filter((l) => l.flags?.[MODULE_ID]?.lightId);
-    const keepAmbientIds = new Set(dropped.map((l) => l.ambientLightId).filter(Boolean));
+    const validDroppedIds = new Set(dropped.map((l) => l.id));
 
-    const staleAmbientIds = existing.filter((ambient) => !keepAmbientIds.has(ambient.id)).map((ambient) => ambient.id);
+    const staleAmbientIds = existing.filter((ambient) => !validDroppedIds.has(ambient.flags?.[MODULE_ID]?.lightId)).map((ambient) => ambient.id);
     if (staleAmbientIds.length) {
       await scene.deleteEmbeddedDocuments("AmbientLight", staleAmbientIds);
     }
 
     const toCreate = [];
     const toUpdate = [];
+    const ambientIdPatches = [];
 
     for (const light of dropped) {
+      if (!light.position) continue;
+
       const config = this.ambientLightConfig(light.id, light.type, light.position);
-      if (light.ambientLightId && scene.lights.get(light.ambientLightId)) {
-        toUpdate.push({ _id: light.ambientLightId, ...config });
-      } else {
+      const existingAmbient = this.findAmbientForLight(scene, light);
+
+      if (!existingAmbient) {
         toCreate.push({ lightId: light.id, config });
+        continue;
+      }
+
+      const changed = Number(existingAmbient.x) !== Number(config.x)
+        || Number(existingAmbient.y) !== Number(config.y)
+        || !lightConfigEqual(existingAmbient.config ?? {}, config.config ?? {});
+
+      if (changed) toUpdate.push({ _id: existingAmbient.id, ...config });
+      if (light.ambientLightId !== existingAmbient.id) {
+        ambientIdPatches.push({ lightId: light.id, ambientLightId: existingAmbient.id });
       }
     }
 
@@ -169,11 +224,21 @@ export class LightManager {
         const createdId = created[i]?.id;
         const lightId = toCreate[i]?.lightId;
         if (!createdId || !lightId) continue;
-        await game.modules.get(MODULE_ID).api.patchLight(lightId, { ambientLightId: createdId });
+        ambientIdPatches.push({ lightId, ambientLightId: createdId });
       }
     }
 
-    debugLog("sync-dropped", { sceneId: scene.id, updates: toUpdate.length, creates: toCreate.length, staleDeletes: staleAmbientIds.length });
+    for (const patch of ambientIdPatches) {
+      await game.modules.get(MODULE_ID).api.patchLight(patch.lightId, { ambientLightId: patch.ambientLightId });
+    }
+
+    debugLog("light change", {
+      sceneId: scene.id,
+      updates: toUpdate.length,
+      creates: toCreate.length,
+      staleDeletes: staleAmbientIds.length,
+      patched: ambientIdPatches.length
+    });
   }
 
   static tokenLightConfig(type) {
@@ -225,9 +290,7 @@ export class LightManager {
 
   static async pickUpLight(light, token) {
     const scene = token?.parent ?? canvas?.scene;
-    if (light.ambientLightId && scene?.lights?.get(light.ambientLightId)) {
-      await scene.deleteEmbeddedDocuments("AmbientLight", [light.ambientLightId]);
-    }
+    await this.deleteAmbientForLight(scene, light);
 
     return {
       ...light,
@@ -241,16 +304,22 @@ export class LightManager {
   static async cleanupExpiredDropped(expiredLights) {
     const grouped = new Map();
     for (const light of expiredLights) {
-      if (light.tokenId || !light.ambientLightId) continue;
+      if (light.tokenId) continue;
       if (!grouped.has(light.sceneId)) grouped.set(light.sceneId, []);
-      grouped.get(light.sceneId).push(light.ambientLightId);
+      grouped.get(light.sceneId).push(light);
     }
 
-    for (const [sceneId, ambientIds] of grouped.entries()) {
+    for (const [sceneId, lights] of grouped.entries()) {
       const scene = game.scenes.get(sceneId);
       if (!scene) continue;
-      const ids = ambientIds.filter((id) => scene.lights.get(id));
-      if (ids.length) await scene.deleteEmbeddedDocuments("AmbientLight", ids);
+
+      for (const light of lights) {
+        try {
+          await this.deleteAmbientForLight(scene, light);
+        } catch (error) {
+          warnLog("light change: cleanup-expired-dropped-failed", { sceneId, lightId: light.id, error: error?.message ?? error });
+        }
+      }
     }
   }
 

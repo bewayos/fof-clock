@@ -1,11 +1,99 @@
 import { MODULE_ID, SETTING_DEBUG, SETTING_STATE } from "./constants.js";
 import { LightManager } from "./light-manager.js";
-import { debugLog } from "./logger.js";
+import { debugLog, isDebugEnabled, warnLog } from "./logger.js";
 import { FoFClockAPI } from "./module-api.js";
 import { UIController } from "./ui-controller.js";
 
 let api;
 let uiController;
+const sceneSyncTimers = new Map();
+
+function logDebugGroup(message, payload = null) {
+  if (!isDebugEnabled()) return;
+  console.group("FOF CLOCK");
+  console.log(message);
+  if (payload !== null) console.log(payload);
+  console.groupEnd();
+}
+
+function scheduleSceneSync(scene, delay = 150) {
+  if (!scene?.id || !api) return;
+
+  const existing = sceneSyncTimers.get(scene.id);
+  if (existing) clearTimeout(existing);
+
+  const timeoutId = setTimeout(async () => {
+    sceneSyncTimers.delete(scene.id);
+    try {
+      await LightManager.syncSceneLights(api.getState(), scene);
+      logDebugGroup("light change: debounced scene sync", { sceneId: scene.id });
+    } catch (error) {
+      warnLog("scene-sync-failed", { sceneId: scene.id, error: error?.message ?? error });
+    }
+  }, delay);
+
+  sceneSyncTimers.set(scene.id, timeoutId);
+}
+
+async function ensureAccessMacro() {
+  if (!game.user?.isGM) return;
+
+  const name = "FoF Clock UI";
+  const command = "game.fofClock.openUI()";
+
+  let macro = game.macros.find((m) => m.name === name && m.type === "script");
+  if (!macro) {
+    macro = await Macro.create({
+      name,
+      type: "script",
+      img: "icons/svg/clockwork.svg",
+      command,
+      scope: "global"
+    });
+    logDebugGroup("light change: created access macro", { macroId: macro?.id });
+  } else if (macro.command !== command) {
+    await macro.update({ command, type: "script" });
+    logDebugGroup("light change: updated access macro", { macroId: macro.id });
+  }
+
+  if (!macro) return;
+
+  const assignedSlots = Object.entries(game.user.hotbar ?? {})
+    .filter(([, macroId]) => macroId === macro.id)
+    .map(([slot]) => Number(slot));
+
+  if (assignedSlots.length) return;
+
+  const firstOpenSlot = Array.from({ length: 50 }, (_, i) => i + 1).find((slot) => !game.user.hotbar?.[slot]);
+  if (firstOpenSlot) {
+    await game.user.assignHotbarMacro(macro, firstOpenSlot);
+    logDebugGroup("light change: assigned macro to hotbar", { slot: firstOpenSlot, macroId: macro.id });
+  }
+}
+
+function ensureSidebarButton(app, html) {
+  if (!game.user?.isGM) return;
+  const tabName = app?.tabName ?? app?.options?.id;
+  if (tabName !== "settings") return;
+
+  if (html.find(".fof-clock-sidebar-button").length) return;
+
+  const button = $(`
+    <button type="button" class="fof-clock-sidebar-button">
+      <i class="fas fa-clock"></i>
+      <span>FoF Clock</span>
+    </button>
+  `);
+
+  button.on("click", () => game.fofClock?.openUI());
+
+  const actions = html.find(".settings-actions, .directory-footer").first();
+  if (actions.length) {
+    actions.append(button);
+  } else {
+    html.append(button);
+  }
+}
 
 function injectFallbackTokenTool(controls) {
   const tokenControls = controls.find((c) => c.name === "token");
@@ -49,7 +137,7 @@ Hooks.once("init", () => {
   });
 });
 
-Hooks.once("ready", () => {
+Hooks.once("ready", async () => {
   api = new FoFClockAPI();
   uiController = new UIController(api);
   game.modules.get(MODULE_ID).api = api;
@@ -57,37 +145,26 @@ Hooks.once("ready", () => {
   game.fofClock = {
     ...(game.fofClock ?? {}),
     api,
-    openUI: () => {
-      debugLog("fallback-openUI", { source: "game.fofClock.openUI" });
-      uiController.openUI();
-    }
+    openUI: () => uiController.openUI()
   };
 
+  await ensureAccessMacro();
   debugLog("ready", { state: api.getState() });
 });
 
 Hooks.on("getSceneControlButtons", (controls) => {
-  console.log("FOF: getSceneControlButtons fired", controls);
-  debugLog("register-scene-controls", { controlGroups: controls.map((c) => c.name) });
+  logDebugGroup("light change: getSceneControlButtons", controls.map((c) => c.name));
+  uiController?.addSceneControl(controls);
+});
 
-  if (!game.user?.isGM) {
-    console.log("FOF: scene controls skipped (non-GM user)");
-    return;
-  }
-
-  console.log("FOF: injecting controls");
-  const added = uiController?.addSceneControl(controls) ?? false;
-
-  if (!added) {
-    console.log("FOF: primary control injection failed, trying token tool fallback");
-    injectFallbackTokenTool(controls);
-  }
+Hooks.on("renderSidebarTab", (app, html) => {
+  ensureSidebarButton(app, html);
 });
 
 Hooks.on("canvasReady", async (canvasRef) => {
   if (!api || !canvasRef?.scene) return;
   await LightManager.syncSceneLights(api.getState(), canvasRef.scene);
-  debugLog("canvasReady-sync", { sceneId: canvasRef.scene.id });
+  logDebugGroup("light change: canvas ready sync", { sceneId: canvasRef.scene.id });
 });
 
 Hooks.on("createToken", async (tokenDoc) => {
@@ -106,14 +183,14 @@ Hooks.on("createToken", async (tokenDoc) => {
     });
   }
 
-  await LightManager.syncSceneLights(api.getState(), tokenDoc.parent);
+  scheduleSceneSync(tokenDoc.parent);
 });
 
-Hooks.on("updateToken", async (tokenDoc, change) => {
+Hooks.on("updateToken", (tokenDoc, change) => {
   if (!api || !tokenDoc?.parent) return;
   if (change.x === undefined && change.y === undefined) return;
 
-  await LightManager.syncSceneLights(api.getState(), tokenDoc.parent);
+  scheduleSceneSync(tokenDoc.parent);
 });
 
 Hooks.on("deleteToken", async (tokenDoc) => {
@@ -123,7 +200,11 @@ Hooks.on("deleteToken", async (tokenDoc) => {
   for (const light of carried) {
     await api.patchLight(light.id, LightManager.onTokenDeletedPatch(light, tokenDoc));
   }
-  await LightManager.syncSceneLights(api.getState(), tokenDoc.parent);
+
+  scheduleSceneSync(tokenDoc.parent);
 });
 
-Hooks.on(`${MODULE_ID}.timeAdvanced`, () => uiController?.app?.safeRender());
+Hooks.on(`${MODULE_ID}.timeAdvanced`, ({ amount } = {}) => {
+  logDebugGroup("time advance", { amount });
+  uiController?.app?.safeRender();
+});
