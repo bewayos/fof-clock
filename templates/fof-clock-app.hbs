@@ -1,0 +1,67 @@
+<section class="fof-clock-app">
+  <section class="fof-section">
+    <h3>Time</h3>
+    <p><strong>{{clockLabel}}</strong></p>
+    <p>Turns: {{turn}} | Phase: {{time.phase}}</p>
+    <div class="fof-row">
+      <button type="button" data-action="advance" data-turns="1">+1 turn</button>
+      <button type="button" data-action="advance" data-turns="5">+5 turns</button>
+      <button type="button" data-action="advance" data-turns="10">+10 turns</button>
+    </div>
+  </section>
+
+  <section class="fof-section">
+    <h3>Lights</h3>
+    <div class="fof-table">
+      <div class="fof-table-head">Type</div>
+      <div class="fof-table-head">Owner</div>
+      <div class="fof-table-head">Turns</div>
+      <div class="fof-table-head">Scene</div>
+      <div class="fof-table-head">Actions</div>
+
+      {{#each lights as |light|}}
+        <div>{{light.typeLabel}}</div>
+        <div>{{light.ownerName}}</div>
+        <div>{{light.remainingTurns}}</div>
+        <div>{{light.sceneName}}</div>
+        <div class="fof-row">
+          <button type="button" data-action="extinguish-id" data-light-id="{{light.id}}">Extinguish</button>
+          <button type="button" data-action="jump-token" data-light-id="{{light.id}}">Jump</button>
+        </div>
+      {{/each}}
+    </div>
+  </section>
+
+  <section class="fof-section">
+    <h3>Actions</h3>
+    <p>Selected token: <strong>{{selectedTokenName}}</strong></p>
+    <div class="fof-row">
+      {{#each lightTypes as |lt|}}
+      <button type="button" data-action="ignite" data-type="{{lt.id}}">Ignite {{lt.name}}</button>
+      {{/each}}
+    </div>
+    <div class="fof-row">
+      <button type="button" data-action="drop">Drop torch</button>
+      <button type="button" data-action="pickup">Pickup nearest torch</button>
+    </div>
+  </section>
+
+  {{#if debug}}
+  <section class="fof-section fof-debug">
+    <h3>Debug</h3>
+    <details>
+      <summary>Raw state JSON</summary>
+      <pre>{{rawState}}</pre>
+    </details>
+    {{#if debugWarnings.length}}
+      <ul>
+        {{#each debugWarnings as |warning|}}
+          <li>{{warning}}</li>
+        {{/each}}
+      </ul>
+    {{else}}
+      <p>No mismatch warnings.</p>
+    {{/if}}
+  </section>
+  {{/if}}
+</section>
