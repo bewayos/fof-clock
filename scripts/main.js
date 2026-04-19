@@ -95,6 +95,30 @@ function ensureSidebarButton(app, html) {
   }
 }
 
+function injectFallbackTokenTool(controls) {
+  const tokenControls = controls.find((c) => c.name === "token");
+  if (!tokenControls) {
+    console.log("FOF: token controls group not found");
+    return false;
+  }
+
+  if (tokenControls.tools.some((t) => t.name === "fof-test")) {
+    console.log("FOF: fallback tool already present");
+    return true;
+  }
+
+  tokenControls.tools.push({
+    name: "fof-test",
+    title: "FoF TEST",
+    icon: "fas fa-bug",
+    button: true,
+    onClick: () => console.log("FOF TEST CLICK")
+  });
+
+  console.log("FOF: fallback tool injected into token controls");
+  return true;
+}
+
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, SETTING_STATE, {
     scope: "world",
