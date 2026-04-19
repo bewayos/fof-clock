@@ -1,4 +1,5 @@
 import { LIGHT_TYPES, MODULE_ID, SETTING_DEBUG } from "./constants.js";
+import { debugLog } from "./logger.js";
 import { TimeManager } from "./time-manager.js";
 
 function debounce(fn, delay = 120) {
@@ -119,18 +120,105 @@ export class UIController {
     this.app = new FoFClockApp(api);
   }
 
+  openUI() {
+    debugLog("ui-open", { userId: game.user.id });
+    this.app.render(true);
+  }
+
+  selectedTokenOrWarn() {
+    const token = canvas?.tokens?.controlled?.[0]?.document;
+    if (!token) {
+      ui.notifications.warn("Select a token first");
+      return null;
+    }
+    return token;
+  }
+
+  async onQuickIgnite() {
+    const token = this.selectedTokenOrWarn();
+    if (!token) return;
+    debugLog("quick-ignite-click", { tokenId: token.id });
+    await this.api.createCarriedLight(token, "torch");
+  }
+
+  async onQuickDrop() {
+    const token = this.selectedTokenOrWarn();
+    if (!token) return;
+    debugLog("quick-drop-click", { tokenId: token.id });
+    await this.api.dropSelectedLight(token);
+  }
+
+  async onQuickPickup() {
+    const token = this.selectedTokenOrWarn();
+    if (!token) return;
+    debugLog("quick-pickup-click", { tokenId: token.id });
+    await this.api.pickUpNearestDroppedLight(token);
+  }
+
   addSceneControl(controls) {
     if (!game.user.isGM) return;
     const tokenControls = controls.find((c) => c.name === "token");
     if (!tokenControls) return;
 
-    if (tokenControls.tools.some((t) => t.name === "fof-clock-open")) return;
-    tokenControls.tools.push({
-      name: "fof-clock-open",
-      title: "FoF Clock",
-      icon: "fas fa-hourglass-half",
-      button: true,
-      onClick: () => this.app.render(true)
-    });
+    const toolsToAdd = [
+      {
+        name: "fof-clock-open",
+        title: "Open FoF Clock",
+        icon: "fas fa-clock",
+        button: true,
+        onClick: () => {
+          debugLog("control-click", { tool: "fof-clock-open" });
+          this.openUI();
+        }
+      },
+      {
+        name: "fof-clock-advance-1",
+        title: "FoF +1 Turn",
+        icon: "fas fa-forward-step",
+        button: true,
+        onClick: async () => {
+          debugLog("control-click", { tool: "fof-clock-advance-1" });
+          await this.api.advanceTime(1);
+        }
+      },
+      {
+        name: "fof-clock-advance-5",
+        title: "FoF +5 Turns",
+        icon: "fas fa-forward",
+        button: true,
+        onClick: async () => {
+          debugLog("control-click", { tool: "fof-clock-advance-5" });
+          await this.api.advanceTime(5);
+        }
+      },
+      {
+        name: "fof-clock-ignite",
+        title: "FoF Ignite (Torch)",
+        icon: "fas fa-fire",
+        button: true,
+        onClick: async () => this.onQuickIgnite()
+      },
+      {
+        name: "fof-clock-drop",
+        title: "FoF Drop Torch",
+        icon: "fas fa-arrow-down",
+        button: true,
+        onClick: async () => this.onQuickDrop()
+      },
+      {
+        name: "fof-clock-pickup",
+        title: "FoF Pickup Torch",
+        icon: "fas fa-hand",
+        button: true,
+        onClick: async () => this.onQuickPickup()
+      }
+    ];
+
+    const existing = new Set(tokenControls.tools.map((t) => t.name));
+    const newTools = toolsToAdd.filter((tool) => !existing.has(tool.name));
+    if (!newTools.length) return;
+
+    tokenControls.tools.push(...newTools);
+    debugLog("controls-registered", { group: "token", tools: newTools.map((t) => t.name) });
   }
 }

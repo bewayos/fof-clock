@@ -29,10 +29,23 @@ Hooks.once("ready", () => {
   api = new FoFClockAPI();
   uiController = new UIController(api);
   game.modules.get(MODULE_ID).api = api;
+
+  game.fofClock = {
+    ...(game.fofClock ?? {}),
+    api,
+    openUI: () => {
+      debugLog("fallback-openUI", { source: "game.fofClock.openUI" });
+      uiController.openUI();
+    }
+  };
+
   debugLog("ready", { state: api.getState() });
 });
 
-Hooks.on("getSceneControlButtons", (controls) => uiController?.addSceneControl(controls));
+Hooks.on("getSceneControlButtons", (controls) => {
+  debugLog("register-scene-controls", { controlGroups: controls.map((c) => c.name) });
+  uiController?.addSceneControl(controls);
+});
 
 Hooks.on("canvasReady", async (canvasRef) => {
   if (!api || !canvasRef?.scene) return;
@@ -63,7 +76,6 @@ Hooks.on("updateToken", async (tokenDoc, change) => {
   if (!api || !tokenDoc?.parent) return;
   if (change.x === undefined && change.y === undefined) return;
 
-  // no position rewrite needed for carried lights; still re-sync to repair manually edited lights.
   await LightManager.syncSceneLights(api.getState(), tokenDoc.parent);
 });
 
