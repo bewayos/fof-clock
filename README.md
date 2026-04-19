@@ -1,62 +1,40 @@
 # FoF Clock & Light Tracker (Foundry VTT v13)
 
-A production-style module (not macro bundle) for expedition-time pressure:
+Production-ready expedition time + light tracking module (no macro dependency).
 
-- Global dungeon turn clock (`1 turn = 10 minutes`)
-- Persistent world-level light registry
-- Carried and dropped lights across scenes
-- Time advancement and automatic burn-down
-- GM warnings at 1 turn remaining
+## What’s new in this upgrade
+
+- Hardened immutable state pipeline with validation + automatic repair on corrupted data.
+- Warning dedupe (`warnedAtOneTurn`) to prevent repeated “almost burned out” spam.
+- Actor fallback resolution when a light’s token is missing on a scene.
+- Safer dropped light handling for manual deletion/scene switches.
+- Expanded GM panel with light table, per-light actions, jump-to-owner, and debug section.
+- Structured debug logs and state transition tracing.
 
 ## Install
 
-1. Copy this folder into your Foundry data path under:
-   - `Data/modules/fofClock`
-2. Ensure `module.json` is inside that folder.
-3. In Foundry, go to **Add-on Modules** and enable **FoF Clock & Light Tracker** for your world.
+1. Copy this folder into Foundry Data: `Data/modules/fofClock`
+2. Ensure `module.json` exists in that folder.
+3. Enable **FoF Clock & Light Tracker** in your world’s Add-on Modules.
 
-## Usage
+## Manual migration note
 
-1. Open **Token Controls** and click the **hourglass icon** to open FoF Clock.
-2. Select a token.
-3. Ignite a light (Torch/Lantern/Candle).
-4. Advance time with `+1/+5/+10` turns.
-5. Drop/Pickup torches as needed.
+No manual migration is required.
+On first read/write, the module validates existing `fofClock.state` and automatically repairs invalid entries.
 
 ## Architecture
 
-- `scripts/main.js`: module bootstrap + hooks
-- `scripts/state-manager.js`: immutable world state read/write
-- `scripts/time-manager.js`: turn → day/hour/minute/phase derivation
-- `scripts/light-manager.js`: carried/dropped light sync + lifecycle
-- `scripts/module-api.js`: all gameplay actions, including `advanceTime(turns)`
-- `scripts/ui-controller.js`: control button + application UI
+- `scripts/main.js`: hooks + bootstrap
+- `scripts/state-manager.js`: state validation/repair + immutable persistence
+- `scripts/time-manager.js`: turn clock math
+- `scripts/light-manager.js`: all light lifecycle/sync logic
+- `scripts/module-api.js`: game actions + orchestration
+- `scripts/ui-controller.js`: application UI and interactions
 
-## Data Model
+## Debugging
 
-World setting key: `game.settings.register("fofClock", "state", ...)`
+Enable **Enable FoF debug logging** in module settings to get:
 
-```js
-{
-  turn: 0,
-  lights: {
-    [id]: {
-      id,
-      type,
-      remainingTurns,
-      sceneId,
-      tokenId,
-      actorId,
-      position,
-      createdAtTurn,
-      ambientLightId
-    }
-  }
-}
-```
-
-## Notes
-
-- Source of truth is world setting state (not token flags).
-- Updates are immutable.
-- Scene restoration runs on `canvasReady` and token hooks.
+- grouped console logs (`FOF CLOCK :: ...`)
+- before/after state transitions
+- debug section in UI with raw state + mismatch warnings

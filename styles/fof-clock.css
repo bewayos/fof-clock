@@ -1,23 +1,36 @@
 .fof-clock-app {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.6rem;
 }
 
-.fof-clock-status h3 {
-  margin: 0;
+.fof-section {
+  border: 1px solid var(--color-border-light-primary);
+  border-radius: 6px;
+  padding: 0.5rem;
 }
 
 .fof-row {
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
+  align-items: center;
 }
 
-.fof-row-stack {
-  flex-direction: column;
+.fof-table {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr 0.6fr 1fr 1.5fr;
+  gap: 0.25rem 0.4rem;
+  align-items: center;
 }
 
-.fof-clock button {
-  cursor: pointer;
+.fof-table-head {
+  font-weight: 700;
+  border-bottom: 1px solid var(--color-border-light-primary);
+}
+
+.fof-debug pre {
+  max-height: 160px;
+  overflow: auto;
+  font-size: 11px;
 }

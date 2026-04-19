@@ -18,4 +18,4 @@ export const LIGHT_PHASES = Object.freeze([
   { id: "night", startHour: 22, endHour: 24 }
 ]);
 
-export const DROPPED_LIGHT_FLAG = `${MODULE_ID}.droppedLightId`;
+export const TOKEN_LIGHT_FLAG = "activeLightId";

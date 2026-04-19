@@ -1,6 +1,6 @@
 import { LIGHT_TYPES, MODULE_ID } from "./constants.js";
+import { debugStateTransition } from "./logger.js";
 import { LightManager } from "./light-manager.js";
-import { debugLog } from "./logger.js";
 import { StateManager } from "./state-manager.js";
 import { TimeManager } from "./time-manager.js";
 
@@ -13,8 +13,12 @@ export class FoFClockAPI {
     return TimeManager.derive(this.getState().turn);
   }
 
+  getLightsForScene(sceneId) {
+    return Object.values(this.getState().lights).filter((l) => l.sceneId === sceneId);
+  }
+
   async patchLight(lightId, patch) {
-    const next = await StateManager.updateState((prev) => {
+    const { next } = await StateManager.updateState((prev) => {
       const curr = prev.lights[lightId];
       if (!curr) return prev;
       return {
@@ -24,8 +28,17 @@ export class FoFClockAPI {
           [lightId]: { ...curr, ...patch }
         }
       };
-    });
+    }, { op: "patchLight", lightId });
     return next.lights[lightId];
+  }
+
+  async removeLight(lightId) {
+    return StateManager.updateState((prev) => {
+      if (!prev.lights[lightId]) return prev;
+      const nextLights = { ...prev.lights };
+      delete nextLights[lightId];
+      return { ...prev, lights: nextLights };
+    }, { op: "removeLight", lightId });
   }
 
   async createCarriedLight(token, type) {
@@ -33,7 +46,7 @@ export class FoFClockAPI {
     if (!LIGHT_TYPES[type]) throw new Error(`Unknown light type ${type}`);
 
     const state = this.getState();
-    const existing = Object.values(state.lights).find((l) => l.tokenId === token.id && l.sceneId === token.parent?.id);
+    const existing = Object.values(state.lights).find((l) => l.sceneId === token.parent.id && (l.tokenId === token.id || (!l.tokenId && l.actorId && l.actorId === token.actorId)));
     if (existing) return existing;
 
     const light = LightManager.buildLight({
@@ -50,39 +63,42 @@ export class FoFClockAPI {
         ...prev.lights,
         [light.id]: light
       }
-    }));
+    }), { op: "createCarriedLight", lightId: light.id });
 
     await LightManager.syncSceneLights(this.getState(), token.parent);
-    debugLog("create-carried-light", { tokenId: token.id, sceneId: token.parent.id, lightId: light.id, type });
+    this.postChat(LightManager.igniteMessage(light, token.name));
     return light;
   }
 
   async extinguishSelected(token) {
     if (!token) return;
-    await StateManager.updateState((prev) => {
-      const remaining = Object.fromEntries(
-        Object.values(prev.lights)
-          .filter((l) => !(l.tokenId === token.id && l.sceneId === token.parent?.id))
-          .map((l) => [l.id, l])
-      );
-      return { ...prev, lights: remaining };
-    });
+    const scene = token.parent;
+    const state = this.getState();
+    const light = Object.values(state.lights).find((l) => l.sceneId === scene.id && (l.tokenId === token.id || (!l.tokenId && l.actorId === token.actorId)));
+    if (!light) return;
 
-    await token.parent.updateEmbeddedDocuments("Token", [{ _id: token.id, light: { dim: 0, bright: 0, color: null } }]);
-    await LightManager.syncSceneLights(this.getState(), token.parent);
-    debugLog("extinguish", { tokenId: token.id, sceneId: token.parent.id });
+    await this.removeLight(light.id);
+    await LightManager.syncSceneLights(this.getState(), scene);
+  }
+
+  async extinguishById(lightId) {
+    const state = this.getState();
+    const light = state.lights[lightId];
+    if (!light) return;
+    await this.removeLight(lightId);
+    const scene = game.scenes.get(light.sceneId);
+    if (scene) await LightManager.syncSceneLights(this.getState(), scene);
   }
 
   async dropSelectedLight(token) {
     if (!token) return;
     const state = this.getState();
-    const light = Object.values(state.lights).find((l) => l.tokenId === token.id && l.sceneId === token.parent?.id);
+    const light = Object.values(state.lights).find((l) => l.sceneId === token.parent.id && l.tokenId === token.id);
     if (!light) return;
 
-    const dropped = await LightManager.dropLight(light, token);
+    const dropped = LightManager.dropLight(light, token);
     await this.patchLight(light.id, dropped);
     await LightManager.syncSceneLights(this.getState(), token.parent);
-    debugLog("drop-light", { tokenId: token.id, sceneId: token.parent.id, lightId: light.id });
   }
 
   async pickUpNearestDroppedLight(token) {
@@ -91,11 +107,7 @@ export class FoFClockAPI {
     const state = this.getState();
     const dropped = Object.values(state.lights)
       .filter((l) => !l.tokenId && l.sceneId === sceneId && l.position)
-      .sort((a, b) => {
-        const da = Math.hypot((a.position.x - token.x), (a.position.y - token.y));
-        const db = Math.hypot((b.position.x - token.x), (b.position.y - token.y));
-        return da - db;
-      });
+      .sort((a, b) => Math.hypot(a.position.x - token.x, a.position.y - token.y) - Math.hypot(b.position.x - token.x, b.position.y - token.y));
 
     const nearest = dropped[0];
     if (!nearest) return;
@@ -103,56 +115,66 @@ export class FoFClockAPI {
     const picked = await LightManager.pickUpLight(nearest, token);
     await this.patchLight(nearest.id, picked);
     await LightManager.syncSceneLights(this.getState(), token.parent);
-    debugLog("pickup-light", { tokenId: token.id, sceneId, lightId: nearest.id });
+  }
+
+  async jumpToLightToken(lightId) {
+    const light = this.getState().lights[lightId];
+    if (!light) return;
+    const scene = game.scenes.get(light.sceneId);
+    if (!scene) return;
+    if (canvas?.scene?.id !== scene.id) await scene.activate();
+
+    const currentScene = canvas.scene;
+    const token = LightManager.resolveTokenForLight(light, currentScene);
+    if (token?.object) {
+      token.object.control({ releaseOthers: true });
+      canvas.animatePan({ x: token.x, y: token.y, scale: 1.2, duration: 300 });
+    } else if (light.position) {
+      canvas.animatePan({ x: light.position.x, y: light.position.y, scale: 1.2, duration: 300 });
+    }
   }
 
   async advanceTime(turns = 1) {
     const amount = Math.max(0, Number(turns || 0));
     if (!amount) return this.getState();
 
-    const prev = this.getState();
-    const nextLights = LightManager.decrementLights(prev.lights, amount);
-    const warningMessages = LightManager.warnings(prev.lights, nextLights);
+    const before = this.getState();
+    const afterLights = LightManager.decrementLights(before.lights, amount);
+    const warnings = LightManager.getNewWarnings(before.lights, afterLights);
+    const expiredLights = Object.values(before.lights).filter((l) => !afterLights[l.id]);
 
-    const expiredLights = Object.values(prev.lights).filter((l) => !nextLights[l.id]);
-    const nextState = await StateManager.setState({
-      turn: prev.turn + amount,
-      lights: nextLights
+    const after = await StateManager.setState({
+      turn: before.turn + amount,
+      lights: afterLights
     });
 
-    for (const light of expiredLights) {
-      if (!light.tokenId && light.ambientLightId) {
-        const scene = game.scenes.get(light.sceneId);
-        if (scene?.lights?.get(light.ambientLightId)) {
-          await scene.deleteEmbeddedDocuments("AmbientLight", [light.ambientLightId]);
-        }
-      }
-    }
+    await LightManager.cleanupExpiredDropped(expiredLights);
+
+    const scene = canvas?.scene;
+    if (scene) await LightManager.syncSceneLights(after, scene);
 
     if (game.user.isGM) {
-      for (const message of warningMessages) {
-        ui.notifications.warn(message);
-      }
+      warnings.forEach((light) => {
+        const msg = LightManager.warningMessage(light);
+        ui.notifications.warn(msg);
+        this.postChat(msg);
+      });
+
+      expiredLights.forEach((light) => this.postChat(LightManager.expirationMessage(light)));
     }
 
-    if (canvas?.scene) {
-      await LightManager.syncSceneLights(nextState, canvas.scene);
-    }
+    const info = TimeManager.derive(after.turn);
+    Hooks.callAll(`${MODULE_ID}.timeAdvanced`, { amount, before, after, clock: info });
+    debugStateTransition("advanceTime", before, after, { amount, warnings: warnings.map((w) => w.id), expired: expiredLights.map((e) => e.id) });
 
-    Hooks.callAll(`${MODULE_ID}.timeAdvanced`, {
-      amount,
-      before: prev,
-      after: nextState,
-      clock: TimeManager.derive(nextState.turn)
+    return after;
+  }
+
+  postChat(content) {
+    if (!game.user.isGM) return;
+    ChatMessage.create({
+      content: `<p><strong>FoF Clock:</strong> ${content}</p>`,
+      whisper: ChatMessage.getWhisperRecipients("GM")
     });
-
-    debugLog("advance-time", {
-      amount,
-      beforeTurn: prev.turn,
-      afterTurn: nextState.turn,
-      expiredCount: expiredLights.length
-    });
-
-    return nextState;
   }
 }

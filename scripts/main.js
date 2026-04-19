@@ -12,10 +12,7 @@ Hooks.once("init", () => {
     scope: "world",
     config: false,
     type: Object,
-    default: {
-      turn: 0,
-      lights: {}
-    }
+    default: { turn: 0, lights: {} }
   });
 
   game.settings.register(MODULE_ID, SETTING_DEBUG, {
@@ -24,62 +21,60 @@ Hooks.once("init", () => {
     type: Boolean,
     default: false,
     name: "Enable FoF debug logging",
-    hint: "When enabled, prints structured logs to browser console."
+    hint: "Structured state/light logs + debug panel in FoF Clock UI."
   });
 });
 
 Hooks.once("ready", () => {
   api = new FoFClockAPI();
   uiController = new UIController(api);
-
   game.modules.get(MODULE_ID).api = api;
   debugLog("ready", { state: api.getState() });
 });
 
-Hooks.on("getSceneControlButtons", (controls) => {
-  uiController?.addSceneControl(controls);
-});
+Hooks.on("getSceneControlButtons", (controls) => uiController?.addSceneControl(controls));
 
 Hooks.on("canvasReady", async (canvasRef) => {
   if (!api || !canvasRef?.scene) return;
   await LightManager.syncSceneLights(api.getState(), canvasRef.scene);
-  debugLog("canvas-ready-sync", { sceneId: canvasRef.scene.id });
+  debugLog("canvasReady-sync", { sceneId: canvasRef.scene.id });
 });
 
 Hooks.on("createToken", async (tokenDoc) => {
-  if (!api) return;
+  if (!api || !tokenDoc?.parent) return;
+
   const state = api.getState();
-  const actorMatches = Object.values(state.lights).filter((l) => !l.tokenId && l.actorId && l.actorId === tokenDoc.actorId && l.sceneId === tokenDoc.parent?.id);
+  const actorMatches = Object.values(state.lights).filter((l) => l.sceneId === tokenDoc.parent.id && !l.tokenId && l.actorId && l.actorId === tokenDoc.actorId);
   if (!actorMatches.length) return;
 
   for (const light of actorMatches) {
     await api.patchLight(light.id, {
-      ...light,
       tokenId: tokenDoc.id,
+      actorId: tokenDoc.actorId ?? light.actorId,
       position: null,
       ambientLightId: null
     });
   }
+
   await LightManager.syncSceneLights(api.getState(), tokenDoc.parent);
 });
 
 Hooks.on("updateToken", async (tokenDoc, change) => {
-  if (!api || !tokenDoc.parent) return;
+  if (!api || !tokenDoc?.parent) return;
   if (change.x === undefined && change.y === undefined) return;
 
-  const state = api.getState();
-  const dropped = Object.values(state.lights).filter((l) => !l.tokenId && l.sceneId === tokenDoc.parent.id);
-  if (!dropped.length) return;
-
-  debugLog("update-token", { tokenId: tokenDoc.id, sceneId: tokenDoc.parent.id, moved: { x: change.x, y: change.y } });
-});
-
-Hooks.on("deleteToken", async (tokenDoc) => {
-  if (!api) return;
-  await LightManager.onTokenDeleted(tokenDoc);
+  // no position rewrite needed for carried lights; still re-sync to repair manually edited lights.
   await LightManager.syncSceneLights(api.getState(), tokenDoc.parent);
 });
 
-Hooks.on(`${MODULE_ID}.timeAdvanced`, () => {
-  uiController?.app?.render(false);
+Hooks.on("deleteToken", async (tokenDoc) => {
+  if (!api || !tokenDoc?.parent) return;
+  const state = api.getState();
+  const carried = Object.values(state.lights).filter((l) => l.sceneId === tokenDoc.parent.id && l.tokenId === tokenDoc.id);
+  for (const light of carried) {
+    await api.patchLight(light.id, LightManager.onTokenDeletedPatch(light, tokenDoc));
+  }
+  await LightManager.syncSceneLights(api.getState(), tokenDoc.parent);
 });
+
+Hooks.on(`${MODULE_ID}.timeAdvanced`, () => uiController?.app?.safeRender());
