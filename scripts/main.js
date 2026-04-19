@@ -7,6 +7,30 @@ import { UIController } from "./ui-controller.js";
 let api;
 let uiController;
 
+function injectFallbackTokenTool(controls) {
+  const tokenControls = controls.find((c) => c.name === "token");
+  if (!tokenControls) {
+    console.log("FOF: token controls group not found");
+    return false;
+  }
+
+  if (tokenControls.tools.some((t) => t.name === "fof-test")) {
+    console.log("FOF: fallback tool already present");
+    return true;
+  }
+
+  tokenControls.tools.push({
+    name: "fof-test",
+    title: "FoF TEST",
+    icon: "fas fa-bug",
+    button: true,
+    onClick: () => console.log("FOF TEST CLICK")
+  });
+
+  console.log("FOF: fallback tool injected into token controls");
+  return true;
+}
+
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, SETTING_STATE, {
     scope: "world",
@@ -43,8 +67,21 @@ Hooks.once("ready", () => {
 });
 
 Hooks.on("getSceneControlButtons", (controls) => {
+  console.log("FOF: getSceneControlButtons fired", controls);
   debugLog("register-scene-controls", { controlGroups: controls.map((c) => c.name) });
-  uiController?.addSceneControl(controls);
+
+  if (!game.user?.isGM) {
+    console.log("FOF: scene controls skipped (non-GM user)");
+    return;
+  }
+
+  console.log("FOF: injecting controls");
+  const added = uiController?.addSceneControl(controls) ?? false;
+
+  if (!added) {
+    console.log("FOF: primary control injection failed, trying token tool fallback");
+    injectFallbackTokenTool(controls);
+  }
 });
 
 Hooks.on("canvasReady", async (canvasRef) => {
