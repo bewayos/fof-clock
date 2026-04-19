@@ -26,6 +26,6 @@
     }
   ],
   "url": "",
-  "manifest": "",
-  "download": ""
+  "manifest": "https://raw.githubusercontent.com/bewayos/VTT_macro/main/module.json",
+  "download": "https://github.com/bewayos/VTT_macro/archive/refs/heads/main.zip"
 }
