@@ -1,0 +1,32 @@
+<section class="fof-clock-app">
+  <header class="fof-clock-status">
+    <h3>{{clockLabel}}</h3>
+    <p>Turns: <strong>{{turn}}</strong></p>
+    <p>Phase: <strong>{{time.phase}}</strong></p>
+    <p>Selected token: <strong>{{selectedTokenName}}</strong></p>
+    <p>Carried lights: <strong>{{carriedCount}}</strong> | Dropped lights: <strong>{{droppedCount}}</strong></p>
+  </header>
+
+  <div class="fof-row">
+    <button type="button" data-action="advance" data-turns="1">+1 turn</button>
+    <button type="button" data-action="advance" data-turns="5">+5 turns</button>
+    <button type="button" data-action="advance" data-turns="10">+10 turns</button>
+  </div>
+
+  <hr/>
+
+  <div class="fof-light-actions">
+    <p><strong>Ignite carried light</strong></p>
+    <div class="fof-row">
+      {{#each lightTypes as |lt|}}
+      <button type="button" data-action="ignite" data-type="{{lt.id}}">{{lt.name}}</button>
+      {{/each}}
+    </div>
+  </div>
+
+  <div class="fof-row fof-row-stack">
+    <button type="button" data-action="extinguish">Extinguish carried light</button>
+    <button type="button" data-action="drop">Drop carried light</button>
+    <button type="button" data-action="pickup">Pick up nearest dropped light</button>
+  </div>
+</section>
