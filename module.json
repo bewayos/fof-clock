@@ -2,7 +2,7 @@
   "id": "fofClock",
   "title": "FoF Clock & Light Tracker",
   "description": "Global dungeon time and carried/dropped light tracking for expedition-style play.",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "authors": [
     {
       "name": "Codex"
