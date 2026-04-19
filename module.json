@@ -26,6 +26,6 @@
     }
   ],
   "url": "",
-  "manifest": "",
-  "download": ""
+  "manifest": "https://raw.githubusercontent.com/bewayos/fof-clock/main/module.json",
+  "download": "https://github.com/bewayos/fof-clock/archive/refs/heads/main.zip"
 }
